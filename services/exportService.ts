@@ -115,7 +115,8 @@ const prepareExportData = ({ items, backgroundImage, bgImageDimensions, bgImageP
       displayHeightM,
       hasPillar: item.type === ItemType.BOOTH && net < gross,
       fontSize: effectiveFontSize,
-      standType: item.type === ItemType.BOOTH ? (item.standType || StandType.STANDARD) : undefined
+      standType: item.type === ItemType.BOOTH ? (item.standType || StandType.STANDARD) : undefined,
+      locked: item.locked // Pass through lock state
     };
   });
 
@@ -290,6 +291,9 @@ export const exportSVG = (context: ExportContext) => {
         textContent += `<text x="0" y="${fontSize + (secFontSize * 2.1)}" font-size="${secFontSize}" fill="#b91c1c" font-weight="bold">⚠ ${item.netAreaM2.toFixed(2)} m²</text>`;
       }
     }
+    
+    // Lock Indicator in Export? Maybe skipping to keep it clean, or adding a small icon. 
+    // Skipping for now to keep export clean unless requested.
 
     if (textContent) {
       itemContent += `<g transform="translate(${cx}, ${cy}) rotate(${-rot})"><g text-anchor="middle" dominant-baseline="middle">${textContent}</g></g>`;

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { PlannerItem, ItemType, BoothType, StandType } from '../types';
-import { Trash2, Box, Columns, RotateCw, Palette, Type, FileText, Layers, Scissors, Rows } from 'lucide-react';
+import { Trash2, Box, Columns, RotateCw, Palette, Type, FileText, Layers, Scissors, Rows, Lock, Unlock } from 'lucide-react';
 
 interface PropertiesPanelProps {
   selectedItems: PlannerItem[];
@@ -29,6 +29,15 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     );
   }
 
+  // Common: Check if all selected items are locked
+  const allLocked = selectedItems.every(i => i.locked);
+  const anyLocked = selectedItems.some(i => i.locked);
+
+  const toggleLock = () => {
+      // If all are locked, unlock all. Otherwise lock all.
+      onUpdate({ locked: !allLocked });
+  };
+
   // Multiple items selected
   if (selectedItems.length > 1) {
       const boothCount = selectedItems.filter(i => i.type === ItemType.BOOTH).length;
@@ -41,20 +50,36 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               <Layers size={18} />
               已选 {selectedItems.length} 项
             </h3>
-            <button
-              onClick={onDelete}
-              className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
-              title="删除全部选中"
-            >
-              <Trash2 size={18} />
-            </button>
+            
+            <div className="flex items-center gap-1">
+                 <button
+                    onClick={toggleLock}
+                    className={`p-2 rounded-full transition-colors ${allLocked ? 'bg-amber-50 text-amber-600' : 'text-slate-400 hover:bg-slate-100'}`}
+                    title={allLocked ? "解锁全部" : "锁定全部"}
+                 >
+                    {allLocked ? <Lock size={18} /> : <Unlock size={18} />}
+                 </button>
+                 <button
+                    onClick={onDelete}
+                    disabled={allLocked}
+                    className={`p-2 rounded-full transition-colors ${allLocked ? 'text-slate-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'}`}
+                    title={allLocked ? "选中的项目已全部锁定，无法删除" : "删除选中项目"}
+                 >
+                    <Trash2 size={18} />
+                 </button>
+            </div>
           </div>
 
           <div className="space-y-2 text-sm text-slate-600">
              <p>包含 {boothCount} 个展位，{pillarCount} 个柱子。</p>
+             {anyLocked && (
+                 <p className="text-amber-600 text-xs flex items-center gap-1">
+                     <Lock size={10} /> 部分或全部项目已锁定，无法移动或调整大小。
+                 </p>
+             )}
           </div>
 
-          <div className="space-y-4">
+          <div className={`space-y-4 ${allLocked ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
              {/* Bulk Color */}
              <div>
                <label className="block text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">
@@ -96,6 +121,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   // Single Item Selected
   const selectedItem = selectedItems[0];
   const isBooth = selectedItem.type === ItemType.BOOTH;
+  const isLocked = !!selectedItem.locked;
   
   // Calculate area in m2: (w * ratio * h * ratio) / 10000
   const areaM2 = ((selectedItem.w * scaleRatio) * (selectedItem.h * scaleRatio) / 10000).toFixed(2);
@@ -107,16 +133,33 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           {isBooth ? <Box size={18} /> : <Columns size={18} />}
           {isBooth ? '编辑展位' : '编辑柱子'}
         </h3>
-        <button
-          onClick={onDelete}
-          className="p-2 text-red-500 hover:bg-red-50 rounded-full transition-colors"
-          title="删除"
-        >
-          <Trash2 size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+            <button
+                onClick={() => onUpdate({ locked: !isLocked })}
+                className={`p-2 rounded-full transition-colors ${isLocked ? 'bg-amber-50 text-amber-600' : 'text-slate-400 hover:bg-slate-100'}`}
+                title={isLocked ? "解锁" : "锁定位置和大小"}
+            >
+                {isLocked ? <Lock size={18} /> : <Unlock size={18} />}
+            </button>
+            <button
+            onClick={onDelete}
+            disabled={isLocked}
+            className={`p-2 rounded-full transition-colors ${isLocked ? 'text-slate-300 cursor-not-allowed' : 'text-red-500 hover:bg-red-50'}`}
+            title={isLocked ? "无法删除 (已锁定)" : "删除"}
+            >
+            <Trash2 size={18} />
+            </button>
+        </div>
       </div>
+      
+      {isLocked && (
+         <div className="bg-amber-50 border border-amber-100 text-amber-700 px-3 py-2 rounded text-xs flex items-center gap-2">
+             <Lock size={12} />
+             <span>该项目已锁定，无法移动或调整大小。</span>
+         </div>
+      )}
 
-      <div className="space-y-4">
+      <div className={`space-y-4 ${isLocked ? 'opacity-50 pointer-events-none' : ''}`}>
         {/* Dimensions */}
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -126,6 +169,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               value={Math.round(selectedItem.w)}
               onChange={(e) => onUpdate({ w: Number(e.target.value) })}
               className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              disabled={isLocked}
             />
           </div>
           <div>
@@ -135,6 +179,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               value={Math.round(selectedItem.h)}
               onChange={(e) => onUpdate({ h: Number(e.target.value) })}
               className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              disabled={isLocked}
             />
           </div>
         </div>
@@ -147,6 +192,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               value={Math.round(selectedItem.x)}
               onChange={(e) => onUpdate({ x: Number(e.target.value) })}
               className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              disabled={isLocked}
             />
           </div>
           <div>
@@ -156,6 +202,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               value={Math.round(selectedItem.y)}
               onChange={(e) => onUpdate({ y: Number(e.target.value) })}
               className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              disabled={isLocked}
             />
           </div>
         </div>
@@ -177,11 +224,13 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               value={selectedItem.rotation || 0}
               onChange={(e) => onUpdate({ rotation: Number(e.target.value) })}
               className="flex-1 p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              disabled={isLocked}
             />
             <button 
                onClick={() => onUpdate({ rotation: ((selectedItem.rotation || 0) + 90) % 360 })}
                className="p-2 bg-slate-100 hover:bg-slate-200 rounded text-slate-600 transition-colors"
                title="顺时针旋转 90°"
+               disabled={isLocked}
             >
               <RotateCw size={16} />
             </button>
@@ -200,6 +249,7 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 value={splitParts}
                 onChange={(e) => setSplitParts(Number(e.target.value))}
                 className="p-1 border rounded text-sm flex-1"
+                disabled={isLocked}
               >
                 <option value={2}>2 份</option>
                 <option value={4}>4 份</option>
@@ -210,25 +260,29 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             <div className="flex gap-2">
               <button
                 onClick={() => onSplit(selectedItem.id, splitParts, 'horizontal')}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-white border border-slate-300 rounded text-xs hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-colors"
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-white border border-slate-300 rounded text-xs hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-colors disabled:opacity-50"
                 title="沿水平方向拆分 (左右)"
+                disabled={isLocked}
               >
                 <Columns size={14} /> 水平 (左右)
               </button>
               <button
                 onClick={() => onSplit(selectedItem.id, splitParts, 'vertical')}
-                className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-white border border-slate-300 rounded text-xs hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-colors"
+                className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-white border border-slate-300 rounded text-xs hover:bg-blue-50 hover:text-blue-600 hover:border-blue-300 transition-colors disabled:opacity-50"
                 title="沿垂直方向拆分 (上下)"
+                disabled={isLocked}
               >
                 <Rows size={14} /> 垂直 (上下)
               </button>
             </div>
           </div>
         )}
-
-        {/* Booth Specifics */}
-        {isBooth && (
-          <>
+      </div>
+      
+      {/* Visual Properties (Always editable even if locked?) - Let's allow visual edits but not geometry */}
+      
+      {isBooth && (
+        <div className="space-y-4 pt-4 border-t border-slate-100">
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">展位标签</label>
               <input
@@ -339,9 +393,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 className="w-full p-2 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-y min-h-[60px]"
               />
             </div>
-          </>
-        )}
-      </div>
+          </div>
+      )}
     </div>
   );
 };

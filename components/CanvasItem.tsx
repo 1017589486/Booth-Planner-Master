@@ -1,7 +1,7 @@
 import React from 'react';
 import { PlannerItem, ItemType, BoothType } from '../types';
 import { calculateBoothNetArea } from '../utils/geometry';
-import { Maximize2, AlertTriangle } from 'lucide-react';
+import { Maximize2, AlertTriangle, Lock } from 'lucide-react';
 
 interface CanvasItemProps {
   item: PlannerItem;
@@ -13,6 +13,7 @@ interface CanvasItemProps {
 
 export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allItems, onMouseDown, scaleRatio }) => {
   const isBooth = item.type === ItemType.BOOTH;
+  const isLocked = item.locked;
   
   // Architectural style for walls
   const wallColor = '#0f172a'; // slate-900
@@ -25,11 +26,6 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
   const secondaryFontSize = Math.max(10, fontSize * 0.5);
 
   // Z-Index Hierarchy:
-  // Level 1: Unselected Booths (10)
-  // Level 2: Selected Booths (20)
-  // Level 3: Unselected Pillars (30)
-  // Level 4: Selected Pillars (40)
-  // This ensures pillars always appear visually "above" booths, representing physical vertical obstructions.
   const baseZ = isBooth ? 10 : 30;
   const zIndex = baseZ + (isSelected ? 10 : 0);
 
@@ -55,6 +51,7 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
     transform: `rotate(${item.rotation}deg)`,
     zIndex: zIndex,
     backgroundColor: isBooth ? (item.color || '#ffffff') : getPillarBg(item.color),
+    cursor: isLocked ? 'default' : 'move',
   };
 
   if (!isBooth) {
@@ -87,8 +84,6 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
   }
 
   if (isSelected) {
-     // We use outline or a wrapper ring for selection to not mess up dimensions
-     // Removed z-50 to use inline style zIndex
      containerClasses += "ring-2 ring-indigo-500 ring-offset-1 shadow-lg ";
   } else {
      containerClasses += "hover:shadow-md hover:ring-1 hover:ring-indigo-300 ";
@@ -186,6 +181,13 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
       {/* Walls for Booths */}
       {renderWalls()}
 
+      {/* Lock Indicator */}
+      {isLocked && (
+        <div className="absolute top-1 right-1 z-50 text-slate-500 bg-white/60 rounded-full p-0.5 shadow-sm backdrop-blur-sm">
+           <Lock size={12} strokeWidth={2.5} />
+        </div>
+      )}
+
       {/* Content Info */}
       <div 
         className="z-30 flex flex-col items-center justify-center text-center pointer-events-none p-1 w-full h-full"
@@ -224,14 +226,14 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
                <div 
                  className="flex items-center justify-center border shadow-sm backdrop-blur-sm"
                  style={{
-                    backgroundColor: 'rgba(254, 242, 242, 0.95)', // Increased opacity for readability
-                    borderColor: '#fecaca', // red-200
-                    color: '#b91c1c', // red-700
+                    backgroundColor: 'rgba(254, 242, 242, 0.95)',
+                    borderColor: '#fecaca',
+                    color: '#b91c1c',
                     borderRadius: '4px',
                     padding: '2px 6px',
                     gap: '4px',
                     marginTop: '2px',
-                    zIndex: 40 // On top of local content
+                    zIndex: 40
                  }}
                >
                   <AlertTriangle size={secondaryFontSize} strokeWidth={2.5} style={{ display: 'block' }} />
@@ -247,8 +249,8 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
         )}
       </div>
 
-      {/* Resize Handle */}
-      {isSelected && (
+      {/* Resize Handle - Hidden if Locked */}
+      {isSelected && !isLocked && (
         <div
           className="absolute -bottom-3 -right-3 w-6 h-6 bg-white border border-indigo-500 cursor-nwse-resize flex items-center justify-center z-50 rounded-full shadow-sm hover:bg-indigo-50 hover:scale-110 transition-transform hover:shadow-md"
           onMouseDown={(e) => onMouseDown(e, item.id, 'RESIZE')}

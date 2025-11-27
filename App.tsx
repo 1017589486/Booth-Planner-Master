@@ -60,7 +60,8 @@ const App: React.FC = () => {
       label: type === ItemType.BOOTH ? `B-${items.length + 1}` : undefined,
       // Leave fontSize undefined for booths to allow auto-scaling
       fontSize: type === ItemType.BOOTH ? undefined : 12,
-      fontColor: type === ItemType.BOOTH ? '#334155' : '#ffffff'
+      fontColor: type === ItemType.BOOTH ? '#334155' : '#ffffff',
+      locked: false,
     };
     
     // Ensure it's safely on screen if the calc above is weird
@@ -78,8 +79,24 @@ const App: React.FC = () => {
 
   const deleteItem = () => {
     if (selectedIds.size === 0) return;
-    setItems(prev => prev.filter(item => !selectedIds.has(item.id)));
-    setSelectedIds(new Set());
+    
+    // Check for locked items among the selection
+    const lockedItemsIds = items.filter(i => selectedIds.has(i.id) && i.locked).map(i => i.id);
+    
+    // Only delete items that are in selection AND NOT locked
+    setItems(prev => prev.filter(item => {
+        // If item is not in selection, keep it
+        if (!selectedIds.has(item.id)) return true;
+        // If item is in selection, keep it ONLY if it is locked
+        return item.locked === true;
+    }));
+
+    // Update selection: If locked items remain, keep them selected. Otherwise clear selection.
+    if (lockedItemsIds.length > 0) {
+        setSelectedIds(new Set(lockedItemsIds));
+    } else {
+        setSelectedIds(new Set());
+    }
   };
 
   const handleSplitItem = (id: string, parts: number, direction: 'horizontal' | 'vertical') => {
@@ -154,6 +171,7 @@ const App: React.FC = () => {
             w: childW,
             h: childH,
             label: `${item.label || 'B'}-${i + 1}`,
+            locked: false, // Reset locked for new parts
             // Inherit other properties
         });
     }
@@ -355,6 +373,7 @@ const App: React.FC = () => {
         id: newId,
         x: existingItem.x + offset,
         y: existingItem.y + offset,
+        locked: false, // Reset locked for duplicated item
       };
 
       setItems(prev => [...prev, newItem]);
@@ -416,6 +435,12 @@ const App: React.FC = () => {
             };
         }
     });
+
+    // Check if the clicked item is locked. If so, only select, do not drag.
+    // If we are resizing and the item is locked, do not resize (handle should be hidden anyway).
+    if (existingItem.locked) {
+        return;
+    }
 
     setDragState({
       isDragging: true,
@@ -486,6 +511,8 @@ const App: React.FC = () => {
       const snappedDy = Math.round(worldDy / GRID_SIZE) * GRID_SIZE;
 
       setItems(prev => prev.map((item: PlannerItem) => {
+        if (item.locked) return item; // Do not move locked items even if selected
+        
         const initialState = dragState.initialItemsState[item.id];
         if (!initialState) return item;
         
@@ -509,6 +536,8 @@ const App: React.FC = () => {
 
       setItems(prev => prev.map((item: PlannerItem) => {
         if (item.id !== activeResizeId) return item;
+        // Safety check for locked items during resize
+        if (item.locked) return item;
         
         const rawW = initialActive.w + dxLocal;
         const rawH = initialActive.h + dyLocal;
@@ -566,6 +595,7 @@ const App: React.FC = () => {
 
           setItems(prev => prev.map(item => {
              if (selectedIds.has(item.id)) {
+                 if (item.locked) return item; // Respect lock for keyboard move
                  return { ...item, x: item.x + dx, y: item.y + dy };
              }
              return item;
@@ -575,7 +605,7 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds]);
+  }, [selectedIds, items]); // Add items to dependency array for lock check in deleteItem
 
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);

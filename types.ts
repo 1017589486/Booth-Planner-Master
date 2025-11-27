@@ -43,6 +43,7 @@ export interface PlannerItem {
   fontSize?: number;
   fontColor?: string;
   notes?: string; // Remarks/Notes
+  locked?: boolean; // Lock status
 }
 
 export interface Selection {
