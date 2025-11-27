@@ -171,6 +171,39 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
 
   const formatDim = (val: number) => Number(val.toFixed(2)).toString();
 
+  // Determine Visual Top-Right Corner for Lock Icon
+  // Normalize rotation to 0-360
+  const normalizedRot = ((item.rotation || 0) % 360 + 360) % 360;
+  
+  const getLockStyle = (): React.CSSProperties => {
+      const style: React.CSSProperties = {
+          position: 'absolute',
+          zIndex: 50,
+          // Counter-rotate the icon itself so it stays upright
+          transform: `rotate(${- (item.rotation || 0)}deg)`,
+      };
+      
+      // Based on rotation, pin to the corner that is visually top-right
+      if (normalizedRot >= 45 && normalizedRot < 135) {
+          // ~90 deg: Visual Top-Right is Local Top-Left
+          style.top = '4px';
+          style.left = '4px';
+      } else if (normalizedRot >= 135 && normalizedRot < 225) {
+          // ~180 deg: Visual Top-Right is Local Bottom-Left
+          style.bottom = '4px';
+          style.left = '4px';
+      } else if (normalizedRot >= 225 && normalizedRot < 315) {
+          // ~270 deg: Visual Top-Right is Local Bottom-Right
+          style.bottom = '4px';
+          style.right = '4px';
+      } else {
+          // ~0 deg: Visual Top-Right is Local Top-Right
+          style.top = '4px';
+          style.right = '4px';
+      }
+      return style;
+  };
+
   return (
     <div
       className={containerClasses}
@@ -181,9 +214,13 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
       {/* Walls for Booths */}
       {renderWalls()}
 
-      {/* Lock Indicator */}
+      {/* Lock Indicator - Position optimized to stay visually top-right */}
       {isLocked && (
-        <div className="absolute top-1 right-1 z-50 text-slate-500 bg-white/60 rounded-full p-0.5 shadow-sm backdrop-blur-sm">
+        <div 
+            style={getLockStyle()}
+            className="text-slate-500 bg-white/60 rounded-full p-0.5 shadow-sm backdrop-blur-sm"
+            title="已锁定"
+        >
            <Lock size={12} strokeWidth={2.5} />
         </div>
       )}
