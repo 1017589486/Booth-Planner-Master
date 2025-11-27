@@ -171,7 +171,6 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
 
   const formatDim = (val: number) => Number(val.toFixed(2)).toString();
 
-  // Determine Visual Top-Right Corner for Lock Icon
   // Normalize rotation to 0-360
   const normalizedRot = ((item.rotation || 0) % 360 + 360) % 360;
   
@@ -200,6 +199,32 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
           // ~0 deg: Visual Top-Right is Local Top-Right
           style.top = '4px';
           style.right = '4px';
+      }
+      return style;
+  };
+
+  const getResizeHandleStyle = (): React.CSSProperties => {
+      const style: React.CSSProperties = {
+          position: 'absolute',
+          zIndex: 50,
+      };
+      // Determine which local corner is visually bottom-right
+      if (normalizedRot >= 45 && normalizedRot < 135) {
+          // ~90 deg: Visual Bottom-Right is Local Top-Right
+          style.top = '-12px'; // Tailwind -top-3
+          style.right = '-12px';
+      } else if (normalizedRot >= 135 && normalizedRot < 225) {
+          // ~180 deg: Visual Bottom-Right is Local Top-Left
+          style.top = '-12px';
+          style.left = '-12px';
+      } else if (normalizedRot >= 225 && normalizedRot < 315) {
+          // ~270 deg: Visual Bottom-Right is Local Bottom-Left
+          style.bottom = '-12px';
+          style.left = '-12px';
+      } else {
+          // ~0 deg: Visual Bottom-Right is Local Bottom-Right
+          style.bottom = '-12px';
+          style.right = '-12px';
       }
       return style;
   };
@@ -289,10 +314,16 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
       {/* Resize Handle - Hidden if Locked */}
       {isSelected && !isLocked && (
         <div
-          className="absolute -bottom-3 -right-3 w-6 h-6 bg-white border border-indigo-500 cursor-nwse-resize flex items-center justify-center z-50 rounded-full shadow-sm hover:bg-indigo-50 hover:scale-110 transition-transform hover:shadow-md"
+          style={getResizeHandleStyle()}
+          className="w-6 h-6 bg-white border border-indigo-500 flex items-center justify-center z-50 rounded-full shadow-sm hover:bg-indigo-50 hover:scale-110 transition-transform hover:shadow-md cursor-se-resize"
           onMouseDown={(e) => onMouseDown(e, item.id, 'RESIZE')}
         >
-          <Maximize2 size={10} className="text-indigo-600 transform rotate-90" />
+          {/* Counter-rotate icon to keep it diagonal relative to screen */}
+          <Maximize2 
+             size={10} 
+             className="text-indigo-600" 
+             style={{ transform: `rotate(${-item.rotation}deg)` }}
+          />
         </div>
       )}
     </div>

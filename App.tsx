@@ -28,7 +28,8 @@ const App: React.FC = () => {
     startY: number;
     initialViewX: number;
     initialViewY: number;
-    activeResizeId: string | null; 
+    activeResizeId: string | null;
+    activeResizeCorner?: number; // 0=TL, 1=TR, 2=BR, 3=BL
     initialBgPos?: { x: number, y: number };
   }>({
     isDragging: false,
@@ -441,12 +442,22 @@ const App: React.FC = () => {
     if (existingItem.locked) {
         return;
     }
+    
+    // Determine active resize corner based on rotation to match visual bottom-right
+    let activeResizeCorner = 2; // Default BR
+    if (type === 'RESIZE') {
+        const normalizedRot = ((existingItem.rotation || 0) % 360 + 360) % 360;
+        if (normalizedRot >= 45 && normalizedRot < 135) activeResizeCorner = 1; // TR
+        else if (normalizedRot >= 135 && normalizedRot < 225) activeResizeCorner = 0; // TL
+        else if (normalizedRot >= 225 && normalizedRot < 315) activeResizeCorner = 3; // BL
+    }
 
     setDragState({
       isDragging: true,
       type: type === 'MOVE' ? 'ITEM_MOVE' : 'ITEM_RESIZE',
       initialItemsState: initialStates,
       activeResizeId: id,
+      activeResizeCorner,
       startX: e.clientX,
       startY: e.clientY,
       initialViewX: 0, 
@@ -477,7 +488,7 @@ const App: React.FC = () => {
         activeResizeId: null,
         startX: e.clientX,
         startY: e.clientY,
-        initialViewX: view.x,
+        initialViewX: view.x, 
         initialViewY: view.y,
       });
     }
@@ -509,11 +520,13 @@ const App: React.FC = () => {
 
       const snappedDx = Math.round(worldDx / GRID_SIZE) * GRID_SIZE;
       const snappedDy = Math.round(worldDy / GRID_SIZE) * GRID_SIZE;
+      
+      const initialItemsState = dragState.initialItemsState;
 
       setItems(prev => prev.map((item: PlannerItem) => {
         if (item.locked) return item; // Do not move locked items even if selected
         
-        const initialState = dragState.initialItemsState[item.id];
+        const initialState = initialItemsState[item.id as string];
         if (!initialState) return item;
         
         return {
@@ -524,33 +537,89 @@ const App: React.FC = () => {
       }));
 
     } else if (dragState.type === 'ITEM_RESIZE' && dragState.activeResizeId) {
-      // Create a local variable for the ID to ensure type narrowing works correctly for indexing
-      const activeResizeId = dragState.activeResizeId as string;
-      const initialActive = dragState.initialItemsState[activeResizeId];
-      if (!initialActive) return;
+       const activeResizeId = dragState.activeResizeId as string;
+       const initialActive = dragState.initialItemsState[activeResizeId];
+       if (!initialActive) return;
+       const cornerIdx = dragState.activeResizeCorner ?? 2; // Default BR
 
-      const rotationRad = (initialActive.rotation * Math.PI) / 180;
-      
-      const dxLocal = (dx * Math.cos(rotationRad) + dy * Math.sin(rotationRad)) / view.scale;
-      const dyLocal = (dy * Math.cos(rotationRad) - dx * Math.sin(rotationRad)) / view.scale;
+       // Helper to rotate point (x,y) by rad
+       const rotate = (x: number, y: number, rad: number) => ({
+           x: x * Math.cos(rad) - y * Math.sin(rad),
+           y: x * Math.sin(rad) + y * Math.cos(rad)
+       });
 
-      setItems(prev => prev.map((item: PlannerItem) => {
-        if (item.id !== activeResizeId) return item;
-        // Safety check for locked items during resize
-        if (item.locked) return item;
-        
-        const rawW = initialActive.w + dxLocal;
-        const rawH = initialActive.h + dyLocal;
+       // 1. Calculate Fixed Corner in World Space
+       const rad = (initialActive.rotation * Math.PI) / 180;
+       const cx = initialActive.x + initialActive.w / 2;
+       const cy = initialActive.y + initialActive.h / 2;
+       
+       // Fixed corner is opposite to drag corner
+       const fixedIdx = (cornerIdx + 2) % 4;
+       
+       const getLocalOffset = (idx: number, w: number, h: number) => {
+           // 0:TL, 1:TR, 2:BR, 3:BL
+           // Offset relative to center
+           const xSign = (idx === 1 || idx === 2) ? 1 : -1;
+           const ySign = (idx === 2 || idx === 3) ? 1 : -1;
+           return { x: xSign * w / 2, y: ySign * h / 2 };
+       };
 
-        const snappedW = Math.round(rawW / GRID_SIZE) * GRID_SIZE;
-        const snappedH = Math.round(rawH / GRID_SIZE) * GRID_SIZE;
+       const fixedOffsetLocal = getLocalOffset(fixedIdx, initialActive.w, initialActive.h);
+       const fixedOffsetWorld = rotate(fixedOffsetLocal.x, fixedOffsetLocal.y, rad);
+       const fixedPoint = { x: cx + fixedOffsetWorld.x, y: cy + fixedOffsetWorld.y };
 
-        return {
-          ...item,
-          w: Math.max(GRID_SIZE, snappedW),
-          h: Math.max(GRID_SIZE, snappedH)
-        };
-      }));
+       // 2. Calculate Current Drag Corner World Position
+       // Initial drag corner world position + delta
+       const dragOffsetLocal = getLocalOffset(cornerIdx, initialActive.w, initialActive.h);
+       const dragOffsetWorld = rotate(dragOffsetLocal.x, dragOffsetLocal.y, rad);
+       const initialDragPoint = { x: cx + dragOffsetWorld.x, y: cy + dragOffsetWorld.y };
+       
+       const currentDragPoint = {
+           x: initialDragPoint.x + dx / view.scale,
+           y: initialDragPoint.y + dy / view.scale
+       };
+
+       // 3. Project Vector (Fixed -> Drag) onto Rotated Axes
+       const V = { x: currentDragPoint.x - fixedPoint.x, y: currentDragPoint.y - fixedPoint.y };
+       
+       // Rotated Axes (Unit vectors)
+       const uX = { x: Math.cos(rad), y: Math.sin(rad) };
+       const uY = { x: -Math.sin(rad), y: Math.cos(rad) };
+
+       const projX = V.x * uX.x + V.y * uX.y;
+       const projY = V.x * uY.x + V.y * uY.y;
+
+       // 4. Determine Signs based on Corner relative to Fixed Point
+       // If dragging BR (2), Vector should be (+w, +h).
+       // If dragging TR (1), Vector should be (+w, -h).
+       // If dragging TL (0), Vector should be (-w, -h).
+       // If dragging BL (3), Vector should be (-w, +h).
+       const signX = (cornerIdx === 1 || cornerIdx === 2) ? 1 : -1;
+       const signY = (cornerIdx === 2 || cornerIdx === 3) ? 1 : -1;
+
+       let newW = projX * signX;
+       let newH = projY * signY;
+
+       // Snap and Clamp
+       newW = Math.max(GRID_SIZE, Math.round(newW / GRID_SIZE) * GRID_SIZE);
+       newH = Math.max(GRID_SIZE, Math.round(newH / GRID_SIZE) * GRID_SIZE);
+
+       // 5. Recalculate New Center & Top-Left based on Fixed Point
+       const newFixedOffsetLocal = getLocalOffset(fixedIdx, newW, newH);
+       const newFixedOffsetWorld = rotate(newFixedOffsetLocal.x, newFixedOffsetLocal.y, rad);
+       
+       // FixedPoint = NewCenter + NewFixedOffsetWorld => NewCenter = FixedPoint - NewFixedOffsetWorld
+       const newCx = fixedPoint.x - newFixedOffsetWorld.x;
+       const newCy = fixedPoint.y - newFixedOffsetWorld.y;
+       
+       const newX = newCx - newW / 2;
+       const newY = newCy - newH / 2;
+
+       setItems(prev => prev.map(item => {
+           if (item.id !== activeResizeId) return item;
+           if (item.locked) return item;
+           return { ...item, x: newX, y: newY, w: newW, h: newH };
+       }));
     }
   };
 
