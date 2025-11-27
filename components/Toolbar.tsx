@@ -55,6 +55,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  // Calculate visual ruler metrics
+  // 1px = scaleRatio (cm)
+  // 100cm (1m) = 100 / scaleRatio (px)
+  const pxPerMeter = 100 / scaleRatio;
+  let rulerWidth = pxPerMeter;
+  let rulerLabel = "1 m";
+
+  // Adjust display if too big or too small
+  if (pxPerMeter > 160) {
+      rulerWidth = pxPerMeter / 10;
+      rulerLabel = "10 cm";
+  } else if (pxPerMeter < 20) {
+      rulerWidth = pxPerMeter * 10;
+      rulerLabel = "10 m";
+  }
+  
+  // Cap at 200px visual width for sidebar safety
+  const displayRulerWidth = Math.min(rulerWidth, 200);
+
   return (
     <div className="w-64 bg-white border-r border-slate-200 flex flex-col shadow-sm z-20 shrink-0 overflow-y-auto">
       <div className="p-5 border-b border-slate-200">
@@ -85,7 +104,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             />
             <span className="text-sm font-mono text-slate-600">cm</span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-1">用于计算实际展位面积 (m²)</p>
+          
+          {/* Visual Scale Ruler */}
+          <div className="mt-3 pl-1">
+             <div className="flex items-end gap-2 mb-1">
+               <div className="relative">
+                  <div 
+                    className="h-2 border-x border-b border-slate-400 relative"
+                    style={{ width: displayRulerWidth }}
+                  ></div>
+                  {/* Center tick if wide enough */}
+                  {displayRulerWidth > 50 && (
+                      <div className="absolute top-0 left-1/2 h-1 w-px bg-slate-300 transform -translate-x-1/2"></div>
+                  )}
+               </div>
+               <span className="text-[10px] font-mono text-slate-500 whitespace-nowrap">{rulerLabel}</span>
+             </div>
+             <p className="text-[10px] text-slate-400">
+               当前: 1m ≈ {Math.round(pxPerMeter)}px
+             </p>
+          </div>
         </div>
       </div>
 

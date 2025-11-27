@@ -23,6 +23,28 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
   const fontSize = item.fontSize || (isBooth ? autoFontSize : 12);
   // Secondary font size for dimensions/area
   const secondaryFontSize = Math.max(10, fontSize * 0.5);
+
+  // Z-Index Hierarchy:
+  // Level 1: Unselected Booths (10)
+  // Level 2: Selected Booths (20)
+  // Level 3: Unselected Pillars (30)
+  // Level 4: Selected Pillars (40)
+  // This ensures pillars always appear visually "above" booths, representing physical vertical obstructions.
+  const baseZ = isBooth ? 10 : 30;
+  const zIndex = baseZ + (isSelected ? 10 : 0);
+
+  // Helper to convert hex to rgba for transparency
+  const getPillarBg = (color?: string) => {
+    const c = color || '#cbd5e1'; // Default slate-300
+    // Handle standard 6-digit hex
+    if (c.startsWith('#') && c.length === 7) {
+        const r = parseInt(c.slice(1, 3), 16);
+        const g = parseInt(c.slice(3, 5), 16);
+        const b = parseInt(c.slice(5, 7), 16);
+        return `rgba(${r}, ${g}, ${b}, 0.5)`; // 50% opacity
+    }
+    return c;
+  };
   
   // Dynamic Styles
   const itemStyle: React.CSSProperties = {
@@ -31,14 +53,18 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
     width: item.w,
     height: item.h,
     transform: `rotate(${item.rotation}deg)`,
-    zIndex: isBooth ? 10 : 50, // Pillars higher
-    backgroundColor: item.color || (isBooth ? '#ffffff' : '#94a3b8'),
+    zIndex: zIndex,
+    backgroundColor: isBooth ? (item.color || '#ffffff') : getPillarBg(item.color),
   };
 
   if (!isBooth) {
-       // Hatch pattern for pillars
-       itemStyle.backgroundImage = 'linear-gradient(45deg, #64748b 25%, transparent 25%, transparent 50%, #64748b 50%, #64748b 75%, transparent 75%, transparent)';
+       // Hatch pattern for pillars - subtler semi-transparent hatch
+       itemStyle.backgroundImage = 'linear-gradient(45deg, rgba(100, 116, 139, 0.2) 25%, transparent 25%, transparent 50%, rgba(100, 116, 139, 0.2) 50%, rgba(100, 116, 139, 0.2) 75%, transparent 75%, transparent)';
        itemStyle.backgroundSize = '8px 8px';
+       // Add shadow to give "height" effect to pillars
+       itemStyle.boxShadow = '2px 4px 6px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05)';
+       // We use RGBA background instead of opacity to keep borders/text sharp
+       itemStyle.backdropFilter = 'blur(1px)'; // Optional: slight frost effect
   }
 
   // Container Classes
@@ -57,12 +83,13 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
     }
   } else {
     // Pillars
-    containerClasses += "border border-slate-600 shadow-md ";
+    containerClasses += "border border-slate-500 ";
   }
 
   if (isSelected) {
      // We use outline or a wrapper ring for selection to not mess up dimensions
-     containerClasses += "ring-2 ring-indigo-500 ring-offset-1 shadow-lg z-50 ";
+     // Removed z-50 to use inline style zIndex
+     containerClasses += "ring-2 ring-indigo-500 ring-offset-1 shadow-lg ";
   } else {
      containerClasses += "hover:shadow-md hover:ring-1 hover:ring-indigo-300 ";
   }
@@ -133,7 +160,7 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
 
   const netAreaPx = isBooth ? calculateBoothNetArea(item, allItems) : 0;
   const grossAreaPx = item.w * item.h;
-  const hasIntrusion = netAreaPx < grossAreaPx;
+  const hasIntrusion = netAreaPx < grossAreaPx - 0.1; // epsilon for float calc
 
   // Calculate Real World Area
   const netAreaM2 = (netAreaPx * scaleRatio * scaleRatio) / 10000;
@@ -195,15 +222,16 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
             
             {hasIntrusion && (
                <div 
-                 className="flex items-center justify-center border"
+                 className="flex items-center justify-center border shadow-sm backdrop-blur-sm"
                  style={{
-                    backgroundColor: '#fef2f2', // red-50
+                    backgroundColor: 'rgba(254, 242, 242, 0.95)', // Increased opacity for readability
                     borderColor: '#fecaca', // red-200
                     color: '#b91c1c', // red-700
-                    borderRadius: '6px',
+                    borderRadius: '4px',
                     padding: '2px 6px',
                     gap: '4px',
-                    boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                    marginTop: '2px',
+                    zIndex: 40 // On top of local content
                  }}
                >
                   <AlertTriangle size={secondaryFontSize} strokeWidth={2.5} style={{ display: 'block' }} />
