@@ -93,9 +93,10 @@ const prepareExportData = ({ items, backgroundImage, bgImageDimensions, bgImageP
     const widthM = (item.w * scaleRatio) / 100;
     const heightM = (item.h * scaleRatio) / 100;
 
-    // REMOVED: Rotation swap logic
-    const displayWidthM = widthM;
-    const displayHeightM = heightM;
+    // Swap if rotated 90/270 to match visual display
+    const isRotated = Math.abs((item.rotation || 0) % 180) === 90;
+    const displayWidthM = isRotated ? heightM : widthM;
+    const displayHeightM = isRotated ? widthM : heightM;
 
     // Calculate effective font size for export consistency
     const effectiveFontSize = item.fontSize || Math.max(14, Math.min(item.w, item.h) / 6);

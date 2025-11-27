@@ -98,9 +98,18 @@ const App: React.FC = () => {
 
     const newItems: PlannerItem[] = [];
 
-    // Horizontal split (along width) -> creates left/right parts
-    // Vertical split (along height) -> creates top/bottom parts
-    const splitWidth = direction === 'horizontal';
+    // Determine if we should split along local Width or Height based on visual intent + rotation.
+    // direction = 'horizontal' means visual Left-Right split.
+    // direction = 'vertical' means visual Top-Bottom split.
+    
+    const isRotated = Math.abs((rotation || 0) % 180) === 90;
+    const wantHorizontalVisual = direction === 'horizontal';
+    
+    // If Rotated (90/270): Local Width is Vertical. Local Height is Horizontal.
+    // So Visual Horizontal Split -> Split Local Height.
+    // If Not Rotated (0/180): Local Width is Horizontal.
+    // So Visual Horizontal Split -> Split Local Width.
+    const splitWidth = isRotated ? !wantHorizontalVisual : wantHorizontalVisual;
     
     const childW = splitWidth ? w / parts : w;
     const childH = splitWidth ? h : h / parts;
@@ -114,11 +123,11 @@ const App: React.FC = () => {
         let offsetY = 0;
 
         if (splitWidth) {
-            // Left to right
+            // Split along local X axis
             const childLocalX = (i * childW) + (childW / 2); // Center of child relative to Top-Left (0,0)
             offsetX = childLocalX - (w / 2); // Center relative to Parent Center
         } else {
-            // Top to bottom
+            // Split along local Y axis
             const childLocalY = (i * childH) + (childH / 2);
             offsetY = childLocalY - (h / 2);
         }
@@ -476,7 +485,7 @@ const App: React.FC = () => {
       const snappedDx = Math.round(worldDx / GRID_SIZE) * GRID_SIZE;
       const snappedDy = Math.round(worldDy / GRID_SIZE) * GRID_SIZE;
 
-      setItems(prev => prev.map(item => {
+      setItems(prev => prev.map((item: PlannerItem) => {
         const initialState = dragState.initialItemsState[item.id];
         if (!initialState) return item;
         
@@ -498,7 +507,7 @@ const App: React.FC = () => {
       const dxLocal = (dx * Math.cos(rotationRad) + dy * Math.sin(rotationRad)) / view.scale;
       const dyLocal = (dy * Math.cos(rotationRad) - dx * Math.sin(rotationRad)) / view.scale;
 
-      setItems(prev => prev.map(item => {
+      setItems(prev => prev.map((item: PlannerItem) => {
         if (item.id !== activeResizeId) return item;
         
         const rawW = initialActive.w + dxLocal;

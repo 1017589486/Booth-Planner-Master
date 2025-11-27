@@ -137,15 +137,15 @@ export const CanvasItem: React.FC<CanvasItemProps> = ({ item, isSelected, allIte
 
   // Calculate Real World Area
   const netAreaM2 = (netAreaPx * scaleRatio * scaleRatio) / 10000;
-  // const grossAreaM2 = (grossAreaPx * scaleRatio * scaleRatio) / 10000;
-
+  
   // Calculate Real World Dimensions in Meters
   const widthM = (item.w * scaleRatio) / 100;
   const heightM = (item.h * scaleRatio) / 100;
 
-  // REMOVED: Rotation swap logic to keep dimensions consistent with properties
-  const displayWidthM = widthM;
-  const displayHeightM = heightM;
+  // Swap displayed dimensions if rotated 90 or 270 degrees to match visual appearance
+  const isRotated = Math.abs((item.rotation || 0) % 180) === 90;
+  const displayWidthM = isRotated ? heightM : widthM;
+  const displayHeightM = isRotated ? widthM : heightM;
 
   const formatDim = (val: number) => Number(val.toFixed(2)).toString();
 
