@@ -75,12 +75,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  // Generate a fingerprint for selection to avoid unnecessary tab switches on re-renders
+  // This ensures we only switch tabs when the selection *actually* changes (IDs change),
+  // not just when the component re-renders due to other state changes (like scaleRatio).
+  const selectionFingerprint = selectedItems.map(i => i.id).join(',');
+
   // Auto-switch to Design tab when selecting items
   useEffect(() => {
     if (selectedItems.length > 0) {
       setActiveTab('design');
     }
-  }, [selectedItems]);
+  }, [selectionFingerprint]);
 
   // Calculate visual ruler metrics
   const pxPerMeter = 100 / scaleRatio;
