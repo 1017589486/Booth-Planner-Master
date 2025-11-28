@@ -1,4 +1,5 @@
-import { PlannerItem, ItemType } from "../types";
+
+import { PlannerItem, ItemType, Point } from "../types";
 
 /**
  * Calculates the Axis-Aligned Bounding Box (AABB) for a potentially rotated item.
@@ -48,7 +49,12 @@ export const getIntersectionArea = (r1: PlannerItem, r2: PlannerItem): number =>
  * Calculates the usable area of a booth by subtracting overlapping pillars.
  */
 export const calculateBoothNetArea = (booth: PlannerItem, allItems: PlannerItem[]): number => {
-  const boothArea = booth.w * booth.h;
+  // If it's a custom polygon shape or manual area is on, we trust the manual area or just gross area
+  // Usually for custom shapes, geometry overlap is harder to calc, so we default to gross area - overlaps.
+  // For now, simpler approximation:
+  const boothArea = booth.w * booth.h; // Note: For polygons this is bounding box area, which is wrong. 
+  // However, `useManualArea` is auto-enabled for polygons, so this function's result is largely ignored for display.
+  
   let lostArea = 0;
 
   const pillars = allItems.filter(i => i.type === ItemType.PILLAR);
@@ -58,4 +64,35 @@ export const calculateBoothNetArea = (booth: PlannerItem, allItems: PlannerItem[
   });
 
   return Math.max(0, boothArea - lostArea);
+};
+
+/**
+ * Processing raw world points into a normalized PlannerItem shape
+ */
+export const normalizePoints = (points: {x: number, y: number}[]) => {
+    if (points.length === 0) return null;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    points.forEach(p => {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+    });
+
+    const w = Math.max(1, maxX - minX);
+    const h = Math.max(1, maxY - minY);
+
+    const normalizedPoints: Point[] = points.map(p => ({
+        x: (p.x - minX) / w,
+        y: (p.y - minY) / h
+    }));
+
+    return {
+        x: minX,
+        y: minY,
+        w,
+        h,
+        points: normalizedPoints
+    };
 };

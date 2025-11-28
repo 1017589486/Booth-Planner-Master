@@ -1,10 +1,12 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { PlannerItem, ItemType, BoothType, StandType } from './types';
 import { DEFAULT_BOOTH, DEFAULT_PILLAR, GRID_SIZE } from './constants';
 import { CanvasItem } from './components/CanvasItem';
 import { Toolbar } from './components/Toolbar';
 import { exportPNG, exportHTML, exportVue, exportSVG, exportJS } from './services/exportService';
-import { ZoomIn, GripHorizontal, RefreshCcw, Image as ImageIcon } from 'lucide-react';
+import { ZoomIn, GripHorizontal, RefreshCcw, Image as ImageIcon, PenTool, CheckCircle } from 'lucide-react';
+import { getBoundingBox, normalizePoints } from './utils/geometry';
 
 const App: React.FC = () => {
   const [items, setItems] = useState<PlannerItem[]>([]);
@@ -15,11 +17,16 @@ const App: React.FC = () => {
   const [bgImagePosition, setBgImagePosition] = useState<{ x: number, y: number }>({ x: 0, y: 0 });
   const [scaleRatio, setScaleRatio] = useState<number>(10); // 1px = 10cm by default
   const [isEditingBackground, setIsEditingBackground] = useState(false);
+  const [isDrawing, setIsDrawing] = useState(false);
   
+  // Polygon Drawing State
+  const [drawingPoints, setDrawingPoints] = useState<{x: number, y: number}[]>([]);
+  const [cursorPos, setCursorPos] = useState<{x: number, y: number} | null>(null);
+
   // Viewport State (Pan & Zoom)
   const [view, setView] = useState({ x: 0, y: 0, scale: 1 });
   
-  // Drag State (Item Move/Resize OR View Pan OR BG Move)
+  // Drag State (Item Move/Resize OR View Pan OR BG Move OR Drawing)
   const [dragState, setDragState] = useState<{
     isDragging: boolean;
     type: 'ITEM_MOVE' | 'ITEM_RESIZE' | 'PAN' | 'BG_MOVE' | null;
@@ -29,7 +36,6 @@ const App: React.FC = () => {
     initialViewX: number;
     initialViewY: number;
     activeResizeId: string | null;
-    activeResizeCorner?: number; // 0=TL, 1=TR, 2=BR, 3=BL
     initialBgPos?: { x: number, y: number };
   }>({
     isDragging: false,
@@ -81,84 +87,85 @@ const App: React.FC = () => {
   const deleteItem = () => {
     if (selectedIds.size === 0) return;
     
-    // Check for locked items among the selection
     const lockedItemsIds = items.filter(i => selectedIds.has(i.id) && i.locked).map(i => i.id);
     
-    // Only delete items that are in selection AND NOT locked
     setItems(prev => prev.filter(item => {
-        // If item is not in selection, keep it
         if (!selectedIds.has(item.id)) return true;
-        // If item is in selection, keep it ONLY if it is locked
         return item.locked === true;
     }));
 
-    // Update selection: If locked items remain, keep them selected. Otherwise clear selection.
     if (lockedItemsIds.length > 0) {
         setSelectedIds(new Set(lockedItemsIds));
     } else {
         setSelectedIds(new Set());
     }
   };
+  
+  const handleToggleWall = (itemId: string, edgeIndex: number) => {
+    setItems(prev => prev.map(item => {
+        if (item.id !== itemId) return item;
+        
+        const currentOpenEdges = item.openEdgeIndices || [];
+        const isOpen = currentOpenEdges.includes(edgeIndex);
+        
+        let newOpenEdges;
+        if (isOpen) {
+            newOpenEdges = currentOpenEdges.filter(i => i !== edgeIndex);
+        } else {
+            newOpenEdges = [...currentOpenEdges, edgeIndex];
+        }
+        
+        return {
+            ...item,
+            openEdgeIndices: newOpenEdges
+        };
+    }));
+  };
 
   const handleSplitItem = (id: string, parts: number, direction: 'horizontal' | 'vertical') => {
     const item = items.find(i => i.id === id);
     if (!item || item.type !== ItemType.BOOTH) return;
     
-    // Geometry calculations to ensure splits align correctly with rotation
+    // Disable split for polygon items for now as geometry is complex
+    if (item.points && item.points.length > 0) {
+        alert("暂不支持自定义形状的自动拆分");
+        return;
+    }
+
     const { w, h, x, y, rotation } = item;
     const rad = ((rotation || 0) * Math.PI) / 180;
     const cos = Math.cos(rad);
     const sin = Math.sin(rad);
 
-    // Parent center in world space
     const parentCx = x + w / 2;
     const parentCy = y + h / 2;
 
     const newItems: PlannerItem[] = [];
-
-    // Determine if we should split along local Width or Height based on visual intent + rotation.
-    // direction = 'horizontal' means visual Left-Right split.
-    // direction = 'vertical' means visual Top-Bottom split.
-    
     const isRotated = Math.abs((rotation || 0) % 180) === 90;
     const wantHorizontalVisual = direction === 'horizontal';
-    
-    // If Rotated (90/270): Local Width is Vertical. Local Height is Horizontal.
-    // So Visual Horizontal Split -> Split Local Height.
-    // If Not Rotated (0/180): Local Width is Horizontal.
-    // So Visual Horizontal Split -> Split Local Width.
     const splitWidth = isRotated ? !wantHorizontalVisual : wantHorizontalVisual;
     
     const childW = splitWidth ? w / parts : w;
     const childH = splitWidth ? h : h / parts;
 
     for (let i = 0; i < parts; i++) {
-        // Calculate offset of child center from parent center in UNROTATED local space
-        // If split width: X offset changes. If split height: Y offset changes.
-        // Coordinate system: Center of parent is (0,0) locally.
-        
         let offsetX = 0;
         let offsetY = 0;
 
         if (splitWidth) {
-            // Split along local X axis
-            const childLocalX = (i * childW) + (childW / 2); // Center of child relative to Top-Left (0,0)
-            offsetX = childLocalX - (w / 2); // Center relative to Parent Center
+            const childLocalX = (i * childW) + (childW / 2); 
+            offsetX = childLocalX - (w / 2); 
         } else {
-            // Split along local Y axis
             const childLocalY = (i * childH) + (childH / 2);
             offsetY = childLocalY - (h / 2);
         }
 
-        // Rotate this offset vector
         const rotatedOffsetX = offsetX * cos - offsetY * sin;
         const rotatedOffsetY = offsetX * sin + offsetY * cos;
 
-        // New World Center
         const childCx = parentCx + rotatedOffsetX;
         const childCy = parentCy + rotatedOffsetY;
 
-        // New Top-Left position (since our system uses Top-Left origin for items)
         const childX = childCx - (childW / 2);
         const childY = childCy - (childH / 2);
         
@@ -172,18 +179,17 @@ const App: React.FC = () => {
             w: childW,
             h: childH,
             label: `${item.label || 'B'}-${i + 1}`,
-            locked: false, // Reset locked for new parts
-            // Inherit other properties
+            locked: false, 
+            useManualArea: item.useManualArea,
+            manualArea: item.useManualArea ? (item.manualArea ? item.manualArea / parts : 0) : undefined
         });
     }
 
-    // Remove old item and add new ones
     setItems(prev => {
         const remaining = prev.filter(i => i.id !== id);
         return [...remaining, ...newItems];
     });
     
-    // Select the new items
     setSelectedIds(new Set(newItems.map(i => i.id)));
   };
 
@@ -241,7 +247,6 @@ const App: React.FC = () => {
             if (jsonData.bgImageDimensions) {
                 setBgImageDimensions(jsonData.bgImageDimensions);
             } else {
-                // Fallback
                 const img = new Image();
                 img.onload = () => {
                   setBgImageDimensions({ w: img.width, h: img.height });
@@ -295,6 +300,44 @@ const App: React.FC = () => {
   const handleExportHTML = () => exportHTML(getExportContext());
   const handleExportVue = () => exportVue(getExportContext());
   const handleExportJS = () => exportJS(getExportContext());
+
+  // --- Drawing Logic ---
+  
+  const finishDrawing = () => {
+      if (drawingPoints.length < 3) {
+          setDrawingPoints([]);
+          setCursorPos(null);
+          return;
+      }
+      
+      const normalized = normalizePoints(drawingPoints);
+      if (!normalized) return;
+
+      const id = Math.random().toString(36).substr(2, 9);
+      const newItem: PlannerItem = {
+           id,
+           type: ItemType.BOOTH,
+           x: normalized.x,
+           y: normalized.y,
+           w: normalized.w,
+           h: normalized.h,
+           rotation: 0,
+           points: normalized.points,
+           // boothType is ignored for polygons now
+           standType: DEFAULT_BOOTH.standType,
+           label: `B-${items.length + 1}`,
+           useManualArea: true, // Enable manual area by default for custom shapes
+           manualArea: 0,
+           locked: false,
+           openEdgeIndices: [] // Default all walls closed
+       };
+       
+       setItems(prev => [...prev, newItem]);
+       setSelectedIds(new Set([id]));
+       setDrawingPoints([]);
+       setCursorPos(null);
+       setIsDrawing(false);
+  };
 
   // --- Mouse Event Handlers ---
 
@@ -359,7 +402,9 @@ const App: React.FC = () => {
   }, [view, isEditingBackground, backgroundImage, bgImageDimensions, bgImagePosition]);
 
   const handleMouseDownItem = (e: React.MouseEvent, id: string, type: 'MOVE' | 'RESIZE') => {
-    if (isEditingBackground) return; // Let event bubble to canvas for BG dragging
+    if (isEditingBackground) return; 
+    if (isDrawing) return; // Ignore item interaction when drawing
+
     e.stopPropagation(); 
     const existingItem = items.find(i => i.id === id);
     if (!existingItem) return;
@@ -422,7 +467,6 @@ const App: React.FC = () => {
 
     setSelectedIds(newSelection);
 
-    // Explicitly type initialStates to avoid 'any' type
     const initialStates: Record<string, { x: number, y: number, w: number, h: number, rotation: number }> = {};
     newSelection.forEach(sid => {
         const it = items.find(i => i.id === sid);
@@ -437,27 +481,15 @@ const App: React.FC = () => {
         }
     });
 
-    // Check if the clicked item is locked. If so, only select, do not drag.
-    // If we are resizing and the item is locked, do not resize (handle should be hidden anyway).
     if (existingItem.locked) {
         return;
     }
     
-    // Determine active resize corner based on rotation to match visual bottom-right
-    let activeResizeCorner = 2; // Default BR
-    if (type === 'RESIZE') {
-        const normalizedRot = ((existingItem.rotation || 0) % 360 + 360) % 360;
-        if (normalizedRot >= 45 && normalizedRot < 135) activeResizeCorner = 1; // TR
-        else if (normalizedRot >= 135 && normalizedRot < 225) activeResizeCorner = 0; // TL
-        else if (normalizedRot >= 225 && normalizedRot < 315) activeResizeCorner = 3; // BL
-    }
-
     setDragState({
       isDragging: true,
       type: type === 'MOVE' ? 'ITEM_MOVE' : 'ITEM_RESIZE',
       initialItemsState: initialStates,
       activeResizeId: id,
-      activeResizeCorner,
       startX: e.clientX,
       startY: e.clientY,
       initialViewX: 0, 
@@ -466,6 +498,9 @@ const App: React.FC = () => {
   };
 
   const handleMouseDownCanvas = (e: React.MouseEvent) => {
+    // If not clicking an item (bubbled up here), we generally clear selection.
+    // HOWEVER, if we just Alt-Clicked a wall, that event should have been stopped.
+    // If it reaches here, it means it's a genuine canvas click.
     setSelectedIds(new Set());
     
     if (isEditingBackground && backgroundImage) {
@@ -480,6 +515,34 @@ const App: React.FC = () => {
          initialViewY: view.y,
          initialBgPos: { ...bgImagePosition }
        });
+    } else if (isDrawing) {
+       // Polygon Drawing Mode
+       const container = canvasRef.current;
+       if (!container) return;
+
+       const rect = container.getBoundingClientRect();
+       const mouseX = e.clientX - rect.left;
+       const mouseY = e.clientY - rect.top;
+
+       const worldX = (mouseX - view.x) / view.scale;
+       const worldY = (mouseY - view.y) / view.scale;
+       
+       // Check if close to start point to close the loop
+       if (drawingPoints.length > 2) {
+           const start = drawingPoints[0];
+           const dx = start.x - worldX;
+           const dy = start.y - worldY;
+           const dist = Math.sqrt(dx*dx + dy*dy);
+           
+           // If within 10 screen pixels (converted to world)
+           if (dist < (10 / view.scale)) {
+               finishDrawing();
+               return;
+           }
+       }
+       
+       setDrawingPoints(prev => [...prev, { x: worldX, y: worldY }]);
+
     } else {
       setDragState({
         isDragging: true,
@@ -495,6 +558,20 @@ const App: React.FC = () => {
   };
 
   const handleMouseMove = (e: MouseEvent) => {
+    // Update cursor pos for drawing line
+    if (isDrawing) {
+         const container = canvasRef.current;
+         if (container) {
+             const rect = container.getBoundingClientRect();
+             const mouseX = e.clientX - rect.left;
+             const mouseY = e.clientY - rect.top;
+             
+             const worldX = (mouseX - view.x) / view.scale;
+             const worldY = (mouseY - view.y) / view.scale;
+             setCursorPos({ x: worldX, y: worldY });
+         }
+    }
+
     if (!dragState.isDragging) return;
 
     const dx = e.clientX - dragState.startX;
@@ -524,7 +601,7 @@ const App: React.FC = () => {
       const initialItemsState = dragState.initialItemsState;
 
       setItems(prev => prev.map((item: PlannerItem) => {
-        if (item.locked) return item; // Do not move locked items even if selected
+        if (item.locked) return item; 
         
         const initialState = initialItemsState[item.id as string];
         if (!initialState) return item;
@@ -538,87 +615,83 @@ const App: React.FC = () => {
 
     } else if (dragState.type === 'ITEM_RESIZE' && dragState.activeResizeId) {
        const activeResizeId = dragState.activeResizeId as string;
-       const initialActive = dragState.initialItemsState[activeResizeId];
-       if (!initialActive) return;
-       const cornerIdx = dragState.activeResizeCorner ?? 2; // Default BR
-
-       // Helper to rotate point (x,y) by rad
-       const rotate = (x: number, y: number, rad: number) => ({
-           x: x * Math.cos(rad) - y * Math.sin(rad),
-           y: x * Math.sin(rad) + y * Math.cos(rad)
-       });
-
-       // 1. Calculate Fixed Corner in World Space
-       const rad = (initialActive.rotation * Math.PI) / 180;
-       const cx = initialActive.x + initialActive.w / 2;
-       const cy = initialActive.y + initialActive.h / 2;
        
-       // Fixed corner is opposite to drag corner
-       const fixedIdx = (cornerIdx + 2) % 4;
-       
-       const getLocalOffset = (idx: number, w: number, h: number) => {
-           // 0:TL, 1:TR, 2:BR, 3:BL
-           // Offset relative to center
-           const xSign = (idx === 1 || idx === 2) ? 1 : -1;
-           const ySign = (idx === 2 || idx === 3) ? 1 : -1;
-           return { x: xSign * w / 2, y: ySign * h / 2 };
-       };
-
-       const fixedOffsetLocal = getLocalOffset(fixedIdx, initialActive.w, initialActive.h);
-       const fixedOffsetWorld = rotate(fixedOffsetLocal.x, fixedOffsetLocal.y, rad);
-       const fixedPoint = { x: cx + fixedOffsetWorld.x, y: cy + fixedOffsetWorld.y };
-
-       // 2. Calculate Current Drag Corner World Position
-       // Initial drag corner world position + delta
-       const dragOffsetLocal = getLocalOffset(cornerIdx, initialActive.w, initialActive.h);
-       const dragOffsetWorld = rotate(dragOffsetLocal.x, dragOffsetLocal.y, rad);
-       const initialDragPoint = { x: cx + dragOffsetWorld.x, y: cy + dragOffsetWorld.y };
-       
-       const currentDragPoint = {
-           x: initialDragPoint.x + dx / view.scale,
-           y: initialDragPoint.y + dy / view.scale
-       };
-
-       // 3. Project Vector (Fixed -> Drag) onto Rotated Axes
-       const V = { x: currentDragPoint.x - fixedPoint.x, y: currentDragPoint.y - fixedPoint.y };
-       
-       // Rotated Axes (Unit vectors)
-       const uX = { x: Math.cos(rad), y: Math.sin(rad) };
-       const uY = { x: -Math.sin(rad), y: Math.cos(rad) };
-
-       const projX = V.x * uX.x + V.y * uX.y;
-       const projY = V.x * uY.x + V.y * uY.y;
-
-       // 4. Determine Signs based on Corner relative to Fixed Point
-       // If dragging BR (2), Vector should be (+w, +h).
-       // If dragging TR (1), Vector should be (+w, -h).
-       // If dragging TL (0), Vector should be (-w, -h).
-       // If dragging BL (3), Vector should be (-w, +h).
-       const signX = (cornerIdx === 1 || cornerIdx === 2) ? 1 : -1;
-       const signY = (cornerIdx === 2 || cornerIdx === 3) ? 1 : -1;
-
-       let newW = projX * signX;
-       let newH = projY * signY;
-
-       // Snap and Clamp
-       newW = Math.max(GRID_SIZE, Math.round(newW / GRID_SIZE) * GRID_SIZE);
-       newH = Math.max(GRID_SIZE, Math.round(newH / GRID_SIZE) * GRID_SIZE);
-
-       // 5. Recalculate New Center & Top-Left based on Fixed Point
-       const newFixedOffsetLocal = getLocalOffset(fixedIdx, newW, newH);
-       const newFixedOffsetWorld = rotate(newFixedOffsetLocal.x, newFixedOffsetLocal.y, rad);
-       
-       // FixedPoint = NewCenter + NewFixedOffsetWorld => NewCenter = FixedPoint - NewFixedOffsetWorld
-       const newCx = fixedPoint.x - newFixedOffsetWorld.x;
-       const newCy = fixedPoint.y - newFixedOffsetWorld.y;
-       
-       const newX = newCx - newW / 2;
-       const newY = newCy - newH / 2;
-
        setItems(prev => prev.map(item => {
-           if (item.id !== activeResizeId) return item;
-           if (item.locked) return item;
-           return { ...item, x: newX, y: newY, w: newW, h: newH };
+          if (item.id !== activeResizeId) return item;
+          if (item.locked) return item;
+          
+          const initialItem = dragState.initialItemsState[activeResizeId];
+          if (!initialItem) return item;
+
+          // Reconstruct a minimal planner item for geometry calc
+          const proxyItem = {
+              ...initialItem,
+              id: activeResizeId,
+              type: ItemType.BOOTH 
+          } as PlannerItem;
+          
+          const aabb = getBoundingBox(proxyItem);
+          const cx = initialItem.x + initialItem.w / 2;
+          const cy = initialItem.y + initialItem.h / 2;
+          const worldHandleX = aabb.x + aabb.w;
+          const worldHandleY = aabb.y + aabb.h;
+
+          // Vector from Center to Handle (World)
+          const vx = worldHandleX - cx;
+          const vy = worldHandleY - cy;
+
+          // Rotate to Local (-rotation)
+          const rad = (-initialItem.rotation * Math.PI) / 180;
+          const hx = vx * Math.cos(rad) - vy * Math.sin(rad);
+          const hxAbs = Math.abs(hx);
+          const hy = vx * Math.sin(rad) + vy * Math.cos(rad);
+          const hyAbs = Math.abs(hy);
+
+          // Determine Signs
+          const signW = hxAbs < 1 ? 0 : Math.sign(hx);
+          const signH = hyAbs < 1 ? 0 : Math.sign(hy);
+
+          // Mouse Delta in Local
+          const worldDx = dx / view.scale;
+          const worldDy = dy / view.scale;
+          
+          // Rotate world delta to local space
+          const localDx = worldDx * Math.cos(rad) - worldDy * Math.sin(rad);
+          const localDy = worldDx * Math.sin(rad) + worldDy * Math.cos(rad);
+
+          // Calculate proposed deltas
+          const dW = localDx * signW;
+          const dH = localDy * signH;
+
+          const rawNewW = initialItem.w + dW;
+          const rawNewH = initialItem.h + dH;
+
+          // Snap and Clamp
+          const newW = Math.max(GRID_SIZE, Math.round(rawNewW / GRID_SIZE) * GRID_SIZE);
+          const newH = Math.max(GRID_SIZE, Math.round(rawNewH / GRID_SIZE) * GRID_SIZE);
+
+          // Calculate effective delta to adjust center
+          const effectiveDW = newW - initialItem.w;
+          const effectiveDH = newH - initialItem.h;
+
+          // Center shift in Local
+          const cslX = (effectiveDW / 2) * signW;
+          const cslY = (effectiveDH / 2) * signH;
+
+          // Rotate back to World (+rotation)
+          const radWorld = (initialItem.rotation * Math.PI) / 180;
+          const cswX = cslX * Math.cos(radWorld) - cslY * Math.sin(radWorld);
+          const cswY = cslX * Math.sin(radWorld) + cslY * Math.cos(radWorld);
+
+          const oldCx = initialItem.x + initialItem.w / 2;
+          const oldCy = initialItem.y + initialItem.h / 2;
+          const newCx = oldCx + cswX;
+          const newCy = oldCy + cswY;
+
+          const newX = newCx - newW / 2;
+          const newY = newCy - newH / 2;
+
+          return { ...item, x: newX, y: newY, w: newW, h: newH };
        }));
     }
   };
@@ -632,6 +705,30 @@ const App: React.FC = () => {
   // --- Keyboard Event Handlers ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape key to cancel drawing or clear selection
+      if (e.key === 'Escape') {
+          if (isDrawing) {
+              if (drawingPoints.length > 0) {
+                  setDrawingPoints([]);
+                  setCursorPos(null);
+              } else {
+                  setIsDrawing(false);
+                  setCursorPos(null);
+              }
+              setDragState(prev => ({ ...prev, isDragging: false, type: null }));
+              return;
+          }
+          if (selectedIds.size > 0) {
+              setSelectedIds(new Set());
+              return;
+          }
+      }
+      
+      if (e.key === 'Enter' && isDrawing) {
+          finishDrawing();
+          return;
+      }
+
       const target = e.target as HTMLElement;
       // Prevent triggering if user is typing in an input field
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) || target.isContentEditable) {
@@ -674,8 +771,9 @@ const App: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedIds, items]); // Add items to dependency array for lock check in deleteItem
+  }, [selectedIds, items, isDrawing, drawingPoints]); 
 
+  // Fix: Added `view` to dependencies so `handleMouseMove` always uses current view coordinates
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
@@ -683,9 +781,15 @@ const App: React.FC = () => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState, view.scale]); 
+  }, [dragState, view, isDrawing]); 
 
   const selectedItems = items.filter(i => selectedIds.has(i.id));
+
+  // Canvas Cursor Logic
+  let cursorClass = 'cursor-default';
+  if (isEditingBackground) cursorClass = 'cursor-move';
+  else if (isDrawing) cursorClass = 'cursor-crosshair';
+  else if (dragState.type === 'PAN') cursorClass = 'cursor-grabbing';
 
   return (
     <div className="flex h-screen w-screen bg-slate-50 text-slate-800 overflow-hidden select-none">
@@ -713,6 +817,8 @@ const App: React.FC = () => {
         isEditingBackground={isEditingBackground}
         setIsEditingBackground={setIsEditingBackground}
         onSplitItem={handleSplitItem}
+        isDrawing={isDrawing}
+        setIsDrawing={setIsDrawing}
       />
 
       <div className="flex-1 relative flex flex-col h-full overflow-hidden">
@@ -722,6 +828,11 @@ const App: React.FC = () => {
                <div className="flex items-center gap-2 px-3 py-1 bg-blue-50 text-blue-700 rounded-full font-bold animate-pulse">
                    <ImageIcon size={14} />
                    <span>正在编辑背景：拖拽移动，滚轮缩放</span>
+               </div>
+            ) : isDrawing ? (
+               <div className="flex items-center gap-2 px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full font-bold animate-pulse">
+                   <PenTool size={14} />
+                   <span>多边形绘制：点击确定顶点，双击或回车完成，ESC 取消</span>
                </div>
             ) : (
                 <>
@@ -767,8 +878,9 @@ const App: React.FC = () => {
 
         <div 
           ref={canvasRef}
-          className={`flex-1 relative overflow-hidden bg-slate-50 ${isEditingBackground ? 'cursor-move' : 'cursor-default'}`}
+          className={`flex-1 relative overflow-hidden bg-slate-50 ${cursorClass}`}
           onMouseDown={handleMouseDownCanvas}
+          onDoubleClick={() => isDrawing && finishDrawing()}
         >
            <div 
               className="absolute inset-0 bg-grid pointer-events-none opacity-50"
@@ -812,9 +924,86 @@ const App: React.FC = () => {
                     allItems={items}
                     onMouseDown={handleMouseDownItem}
                     scaleRatio={scaleRatio}
+                    onToggleWall={handleToggleWall}
                     />
                 ))}
               </div>
+
+              {/* Render Temporary Drawing Path */}
+              {isDrawing && (
+                  <svg 
+                     style={{ 
+                         position: 'absolute', 
+                         top: 0, 
+                         left: 0, 
+                         overflow: 'visible', 
+                         pointerEvents: 'none', 
+                         zIndex: 999 
+                     }}
+                     // Using 1px ensures DOM presence without blocking clicks if pointer-events fails
+                     width="1"
+                     height="1"
+                     className="overflow-visible"
+                  >
+                     {/* Dynamic Filled Polygon Preview */}
+                     {drawingPoints.length > 0 && cursorPos && (
+                        <polygon 
+                            points={[...drawingPoints, cursorPos].map(p => `${p.x},${p.y}`).join(' ')}
+                            fill="rgba(99, 102, 241, 0.2)"
+                            stroke="none"
+                        />
+                     )}
+
+                     {/* Closing Line Preview (Cursor to Start) */}
+                     {drawingPoints.length > 0 && cursorPos && (
+                        <line 
+                           x1={cursorPos.x}
+                           y1={cursorPos.y}
+                           x2={drawingPoints[0].x}
+                           y2={drawingPoints[0].y}
+                           stroke="#818cf8"
+                           strokeWidth="1.5"
+                           strokeDasharray="4"
+                           opacity="0.5"
+                        />
+                     )}
+
+                     {/* Lines between confirmed points */}
+                     <polyline 
+                         points={drawingPoints.map(p => `${p.x},${p.y}`).join(' ')}
+                         fill="none"
+                         stroke="#4f46e5"
+                         strokeWidth="2"
+                         strokeDasharray="4"
+                     />
+                     
+                     {/* Line from last point to cursor */}
+                     {drawingPoints.length > 0 && cursorPos && (
+                         <line 
+                            x1={drawingPoints[drawingPoints.length - 1].x}
+                            y1={drawingPoints[drawingPoints.length - 1].y}
+                            x2={cursorPos.x}
+                            y2={cursorPos.y}
+                            stroke="#818cf8"
+                            strokeWidth="1.5"
+                            strokeDasharray="4"
+                         />
+                     )}
+                     
+                     {/* Points */}
+                     {drawingPoints.map((p, i) => (
+                         <circle 
+                             key={i} 
+                             cx={p.x} 
+                             cy={p.y} 
+                             r={4 / view.scale} 
+                             fill="#4f46e5" 
+                             stroke="white" 
+                             strokeWidth="1" 
+                         />
+                     ))}
+                  </svg>
+              )}
            </div>
         </div>
       </div>

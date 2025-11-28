@@ -19,7 +19,8 @@ import {
   Lock, 
   Unlock,
   PenTool,
-  Grid
+  Grid,
+  MousePointer2
 } from 'lucide-react';
 
 interface ToolbarProps {
@@ -45,6 +46,8 @@ interface ToolbarProps {
   isEditingBackground: boolean;
   setIsEditingBackground: (val: boolean) => void;
   onSplitItem?: (id: string, parts: number, direction: 'horizontal' | 'vertical') => void;
+  isDrawing?: boolean;
+  setIsDrawing?: (val: boolean) => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -69,7 +72,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onDeleteItem,
   isEditingBackground,
   setIsEditingBackground,
-  onSplitItem
+  onSplitItem,
+  isDrawing,
+  setIsDrawing
 }) => {
   const [activeTab, setActiveTab] = useState<'design' | 'canvas' | 'file'>('design');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -162,6 +167,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                     <span className="text-xs font-medium text-slate-600 group-hover:text-slate-700">添加柱子</span>
                  </button>
                </div>
+
+               {/* Manual Draw Button */}
+               {setIsDrawing && (
+                 <button
+                    onClick={() => setIsDrawing(!isDrawing)}
+                    className={`w-full flex items-center justify-center gap-2 p-3 border rounded-xl transition-all shadow-sm mt-2 font-medium text-xs ${isDrawing ? 'bg-indigo-600 text-white border-indigo-600 shadow-indigo-200' : 'bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600'}`}
+                 >
+                    {isDrawing ? <MousePointer2 size={16} /> : <PenTool size={16} />}
+                    {isDrawing ? '退出绘制模式' : '手动绘制展位'}
+                 </button>
+               )}
             </div>
             
             <div className="w-full h-px bg-slate-200 my-1"></div>

@@ -1,3 +1,4 @@
+
 export enum ItemType {
   BOOTH = 'BOOTH',
   PILLAR = 'PILLAR'
@@ -27,6 +28,11 @@ export interface Position {
   y: number;
 }
 
+export interface Point {
+  x: number; // Normalized 0-1
+  y: number; // Normalized 0-1
+}
+
 export interface PlannerItem {
   id: string;
   type: ItemType;
@@ -44,6 +50,12 @@ export interface PlannerItem {
   fontColor?: string;
   notes?: string; // Remarks/Notes
   locked?: boolean; // Lock status
+  // Manual Area Override
+  useManualArea?: boolean;
+  manualArea?: number;
+  // Custom Shape
+  points?: Point[]; // If present, renders as a polygon. Coordinates are normalized 0-1 relative to w/h.
+  openEdgeIndices?: number[]; // Indices of polygon edges that are "open" (no wall). Edge i connects point[i] to point[i+1].
 }
 
 export interface Selection {
